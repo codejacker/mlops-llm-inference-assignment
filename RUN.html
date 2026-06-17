@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RUN — text-to-SQL MLOps assignment</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --surface:#ffffff; --surface2:#f1efe8; --text:#2c2c2a;
+    --muted:#5f5e5a; --border:#dcdace; --accent:#185fa5;
+    --code-bg:#f1efe8; --teal:#0f6e56; --amber:#854f0b; --coral:#993c1d; --purple:#534ab7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1d1d1b; --surface:#262624; --surface2:#2f2f2c; --text:#ecebe6;
+      --muted:#b4b2a9; --border:#3a3a36; --accent:#85b7eb; --code-bg:#2f2f2c;
+      --teal:#5dcaa5; --amber:#ef9f27; --coral:#f0997b; --purple:#afa9ec; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.7;font-size:16px}
+  .wrap{max-width:880px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:30px;font-weight:600;margin:0 0 4px}
+  h2{font-size:22px;font-weight:600;margin:48px 0 10px;padding-top:14px;border-top:1px solid var(--border)}
+  h3{font-size:17px;font-weight:600;margin:26px 0 6px}
+  p{margin:10px 0}
+  .lead{color:var(--muted);font-size:18px;margin-top:0}
+  code{background:var(--code-bg);padding:2px 6px;border-radius:5px;font-size:.9em;
+    font-family:"SF Mono",Menlo,Consolas,monospace}
+  pre{background:var(--code-bg);padding:14px 16px;border-radius:10px;overflow:auto;border:1px solid var(--border)}
+  pre code{background:none;padding:0}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:15px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600}
+  .nav{display:flex;gap:16px;margin:18px 0 0;flex-wrap:wrap}
+  .nav a{color:var(--accent);text-decoration:none;font-size:15px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .callout{background:var(--surface2);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:12px 16px;margin:16px 0}
+  .b{font-weight:600}
+  svg{max-width:100%;height:auto;display:block;margin:8px 0}
+  figcaption{color:var(--muted);font-size:14px;margin-top:4px}
+  .step{display:flex;gap:12px;margin:10px 0}
+  .step .n{flex:0 0 26px;height:26px;border-radius:50%;background:var(--surface2);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600}
+  ol{padding-left:22px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>RUN — operating the system</h1>
+<p class="lead">SSH forwarding, what vLLM does, what to run on your Mac vs. the VM, and how data flows on every request. Companion to <a href="BUILD.html">BUILD.html</a>.</p>
+<div class="nav">
+  <a href="#ssh">1. SSH forwarding</a>
+  <a href="#vllm">2. What vLLM does</a>
+  <a href="#mac">3. Run on Mac</a>
+  <a href="#vm">4. Run on the VM</a>
+  <a href="#flow">5. Request data flow</a>
+  <a href="#seam">6. Backend seam</a>
+  <a href="#o11y">7. Observability at runtime</a>
+</div>
+
+<h2 id="ssh">1. SSH and port forwarding — what it means</h2>
+<p><span class="b">SSH</span> (Secure Shell) is an encrypted connection to a remote machine's terminal. You log into the cloud VM with it. But the VM's web UIs (Grafana, Langfuse, Prometheus) listen on <code>localhost</code> <em>on the VM</em> — not exposed to the internet. <span class="b">Port forwarding</span> tunnels a port on your laptop through the SSH connection to a port on the VM, so your laptop browser can reach them safely.</p>
+<pre><code>ssh -L 3000:localhost:3000 \   # laptop:3000  -&gt;  VM's localhost:3000 (Grafana)
+    -L 9090:localhost:9090 \   # Prometheus
+    -L 3001:localhost:3001 \   # Langfuse
+    -L 8000:localhost:8000 \   # vLLM
+    -L 8001:localhost:8001 \   # your agent
+    user@vm-host</code></pre>
+<p>Each <code>-L local:localhost:remote</code> means "anything I open at <code>http://localhost:local</code> on my laptop, send through the tunnel to <code>localhost:remote</code> on the VM." With the session open, <code>http://localhost:3000</code> in your browser hits Grafana on the VM. If a UI won't load, the forward is the first suspect.</p>
+
+<figure>
+<svg viewBox="0 0 820 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SSH port forwarding">
+  <defs><marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round"/></marker></defs>
+  <g font-family="-apple-system,sans-serif" font-size="13">
+  <rect x="20" y="40" width="200" height="140" rx="10" fill="#e6f1fb" stroke="#185fa5"/>
+  <text x="120" y="62" text-anchor="middle" fill="#0c447c" font-weight="600">Your laptop</text>
+  <text x="120" y="92" text-anchor="middle" fill="#185fa5">localhost:3000</text>
+  <text x="120" y="112" text-anchor="middle" fill="#185fa5">localhost:8001</text>
+  <text x="120" y="140" text-anchor="middle" fill="#185fa5">browser</text>
+
+  <rect x="340" y="80" width="140" height="56" rx="10" fill="#f1efe8" stroke="#5f5e5a"/>
+  <text x="410" y="104" text-anchor="middle" fill="#2c2c2a" font-weight="600">SSH tunnel</text>
+  <text x="410" y="122" text-anchor="middle" fill="#5f5e5a">encrypted</text>
+
+  <rect x="600" y="40" width="200" height="140" rx="10" fill="#eaf3de" stroke="#3b6d11"/>
+  <text x="700" y="62" text-anchor="middle" fill="#27500a" font-weight="600">Cloud VM (H100)</text>
+  <text x="700" y="92" text-anchor="middle" fill="#3b6d11">Grafana, Langfuse</text>
+  <text x="700" y="112" text-anchor="middle" fill="#3b6d11">vLLM, agent</text>
+  <text x="700" y="140" text-anchor="middle" fill="#3b6d11">all on localhost</text>
+
+  <line x1="220" y1="108" x2="338" y2="108" stroke="#888780" stroke-width="1.6" marker-end="url(#ah2)"/>
+  <line x1="480" y1="108" x2="598" y2="108" stroke="#888780" stroke-width="1.6" marker-end="url(#ah2)"/>
+  </g>
+</svg>
+<figcaption>The VM's services never touch the public internet; you reach them only through the tunnel.</figcaption>
+</figure>
+
+<h2 id="vllm">2. What vLLM does</h2>
+<p><span class="b">vLLM</span> is a high-performance inference server for LLMs. You give it a model (Qwen3-30B) and it exposes an <span class="b">OpenAI-compatible HTTP API</span> at <code>:8000</code> — the same <code>/v1/chat/completions</code> shape OpenAI uses. Your agent sends prompts there and gets text back. Why vLLM instead of plain PyTorch:</p>
+<ul>
+  <li><span class="b">Continuous batching</span> — it merges many concurrent requests into one GPU batch, so 10 users don't wait in line; throughput scales.</li>
+  <li><span class="b">PagedAttention / KV cache</span> — it stores each request's attention state in GPU memory in pages, packing far more concurrent requests into 80GB. This is the capacity lever you tune.</li>
+  <li><span class="b">/metrics endpoint</span> — it publishes Prometheus metrics (latency, tokens/s, KV usage, queue depth) that your Grafana dashboard reads.</li>
+</ul>
+<div class="callout"><span class="b">The OpenAI-compatible part is the whole trick.</span> Because vLLM and OpenAI speak the same protocol, your agent code is identical whether it talks to a local vLLM or to OpenAI in the cloud. You only change a URL (see <a href="#seam">section 6</a>).</div>
+
+<h2 id="mac">3. Run on your Mac (off-GPU, no H100)</h2>
+<p>Everything except serving the 30B model and reporting latency works locally. The agent talks to OpenAI instead of vLLM. One-time setup is done; this is how to use it.</p>
+<ol>
+  <li>Put OpenAI creds in <code>.env</code> (uncomment the block):
+<pre><code>VLLM_BASE_URL=https://api.openai.com/v1
+VLLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...</code></pre></li>
+  <li>Start the o11y stack (optional locally — needed for Phase 4 Langfuse):
+<pre><code>docker compose up -d</code></pre></li>
+  <li>Start the agent (uses the Mac dev venv with no vllm):
+<pre><code>.venv-dev/bin/uvicorn agent.server:app --port 8001</code></pre></li>
+  <li>Smoke-test one question:
+<pre><code>curl -s localhost:8001/answer -H 'content-type: application/json' \
+  -d '{"question":"How many circuits are there?","db":"formula_1"}' | python3 -m json.tool</code></pre></li>
+  <li>Run the full eval against OpenAI (validates the harness; real numbers come from the H100):
+<pre><code>.venv-dev/bin/python evals/run_eval.py --out results/eval_local.json</code></pre></li>
+</ol>
+<p class="b">Already verified working on this Mac without any key:</p>
+<table>
+  <tr><td>agent imports, graph compiles</td><td>✓</td></tr>
+  <tr><td>server <code>/health</code> + <code>/answer</code> route registered</td><td>✓</td></tr>
+  <tr><td>schema rendering, SQL execution on real BIRD DBs</td><td>✓</td></tr>
+  <tr><td>eval comparison (gold==gold true, gold==wrong false)</td><td>✓</td></tr>
+</table>
+<p>Only the LLM call itself needs the key (or the GPU).</p>
+
+<h2 id="vm">4. Run on the GPU VM (full system)</h2>
+<p>After forwarding the five ports (section 1), run on the VM:</p>
+<ol>
+  <li><span class="b">Setup once:</span> <code>uv sync</code> · <code>cp .env.example .env</code> · <code>uv run python scripts/load_data.py</code> · <code>docker compose up -d</code></li>
+  <li><span class="b">Phase 1 — serve vLLM:</span>
+<pre><code>bash scripts/start_vllm.sh        # add tuning flags here
+# confirm: curl localhost:8000/v1/models</code></pre></li>
+  <li><span class="b">Phase 2 — dashboard:</span> open Grafana at <code>localhost:3000</code> (admin/admin). The dashboard auto-loads from <code>serving.json</code>; fire requests and watch panels react.</li>
+  <li><span class="b">Phase 3 — agent:</span> <code>uv run uvicorn agent.server:app --host 0.0.0.0 --port 8001</code>, then curl a question.</li>
+  <li><span class="b">Phase 4 — Langfuse:</span> create a project at <code>localhost:3001</code>, paste public/secret keys into <code>.env</code>, restart the agent, fire 10 questions, inspect a trace.</li>
+  <li><span class="b">Phase 5 — baseline eval:</span> <code>uv run python evals/run_eval.py --out results/eval_baseline.json</code> (watch Grafana — ~60 vLLM calls).</li>
+  <li><span class="b">Phase 6 — SLO:</span> <code>uv run python load_test/driver.py --rps 10 --duration 300</code>. Diagnose from the dashboard, change one flag, re-run, log it. Then re-eval to <code>results/eval_after_tuning.json</code>.</li>
+  <li><span class="b">Phase 7 — REPORT.md</span> and screenshots.</li>
+</ol>
+
+<h2 id="flow">5. What happens on every request</h2>
+<figure>
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Request lifecycle">
+  <defs><marker id="ah3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round"/></marker></defs>
+  <g font-family="-apple-system,sans-serif" font-size="12.5">
+  <rect x="20" y="20" width="150" height="40" rx="8" fill="#eeedfe" stroke="#534ab7"/><text x="95" y="44" text-anchor="middle" fill="#3c3489">POST /answer</text>
+  <rect x="20" y="90" width="150" height="40" rx="8" fill="#e1f5ee" stroke="#0f6e56"/><text x="95" y="114" text-anchor="middle" fill="#085041">attach_schema</text>
+  <rect x="20" y="160" width="150" height="40" rx="8" fill="#eeedfe" stroke="#534ab7"/><text x="95" y="178" text-anchor="middle" fill="#3c3489">generate_sql</text><text x="95" y="193" text-anchor="middle" fill="#534ab7" font-size="11">LLM #1</text>
+  <rect x="240" y="160" width="150" height="40" rx="8" fill="#e1f5ee" stroke="#0f6e56"/><text x="315" y="184" text-anchor="middle" fill="#085041">execute</text>
+  <rect x="460" y="160" width="150" height="40" rx="8" fill="#eeedfe" stroke="#534ab7"/><text x="535" y="178" text-anchor="middle" fill="#3c3489">verify</text><text x="535" y="193" text-anchor="middle" fill="#534ab7" font-size="11">LLM #2</text>
+  <rect x="460" y="240" width="150" height="40" rx="8" fill="#faece7" stroke="#993c1d"/><text x="535" y="258" text-anchor="middle" fill="#993c1d">revise</text><text x="535" y="273" text-anchor="middle" fill="#993c1d" font-size="11">LLM #3</text>
+  <rect x="680" y="160" width="120" height="40" rx="8" fill="#eaf3de" stroke="#3b6d11"/><text x="740" y="184" text-anchor="middle" fill="#27500a">return rows</text>
+
+  <line x1="95" y1="60" x2="95" y2="90" stroke="#888780" stroke-width="1.4" marker-end="url(#ah3)"/>
+  <line x1="95" y1="130" x2="95" y2="160" stroke="#888780" stroke-width="1.4" marker-end="url(#ah3)"/>
+  <line x1="170" y1="180" x2="238" y2="180" stroke="#888780" stroke-width="1.4" marker-end="url(#ah3)"/>
+  <line x1="390" y1="180" x2="458" y2="180" stroke="#888780" stroke-width="1.4" marker-end="url(#ah3)"/>
+  <line x1="610" y1="180" x2="678" y2="180" stroke="#3b6d11" stroke-width="1.4" marker-end="url(#ah3)"/>
+  <text x="628" y="174" fill="#3b6d11" font-size="11">ok</text>
+  <path d="M535 200 L535 240" fill="none" stroke="#993c1d" stroke-width="1.4" marker-end="url(#ah3)"/>
+  <text x="542" y="224" fill="#993c1d" font-size="11">not ok</text>
+  <path d="M460 260 L315 260 L315 200" fill="none" stroke="#993c1d" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ah3)"/>
+  <text x="350" y="254" fill="#993c1d" font-size="11">loop (max 3)</text>
+  </g>
+</svg>
+<figcaption>generate (LLM #1) → execute → verify (LLM #2) → ok ends it; not-ok routes to revise (LLM #3) → re-execute → verify, capped at 3 iterations.</figcaption>
+</figure>
+<p>So one user question is up to <span class="b">3 LLM calls</span>. "1 RPS at the agent" is ~2–3× that load on vLLM — the core tension of the Phase 6 SLO.</p>
+
+<h2 id="seam">6. The backend seam — off-GPU to GPU, no code change</h2>
+<p>The agent reads three env vars (<code>agent/graph.py</code>). Switching backends is three lines:</p>
+<table>
+  <tr><th></th><th>Off-GPU (build/debug)</th><th>On the H100 (real numbers)</th></tr>
+  <tr><td><code>VLLM_BASE_URL</code></td><td><code>https://api.openai.com/v1</code></td><td><code>http://localhost:8000/v1</code></td></tr>
+  <tr><td><code>VLLM_MODEL</code></td><td><code>gpt-4o-mini</code></td><td><code>Qwen/Qwen3-30B-A3B-Instruct-2507</code></td></tr>
+  <tr><td><code>OPENAI_API_KEY</code></td><td><code>sk-...</code></td><td><code>not-needed</code></td></tr>
+</table>
+<p>Agent, eval, and load test are byte-identical in both worlds. <span class="b">Caveat:</span> final prompt tuning and all reported numbers (eval pass rate, latency, SLO) must come from the real Qwen3 on the H100 — tokenization and behavior differ.</p>
+
+<h2 id="o11y">7. Observability at runtime — where the data goes</h2>
+<p>Two independent paths run during every request:</p>
+<table>
+  <tr><th></th><th>Serving x-ray</th><th>Agent x-ray</th></tr>
+  <tr><td>Tool</td><td>Prometheus + Grafana</td><td>Langfuse</td></tr>
+  <tr><td>Source</td><td>vLLM <code>/metrics</code> (scraped every 5s)</td><td>LangGraph callback on each node</td></tr>
+  <tr><td>Answers</td><td>"Is it slow, and where in the request lifecycle?"</td><td>"Why was this one request slow?"</td></tr>
+  <tr><td>Shows</td><td>latency percentiles, tokens/s, KV cache, queue</td><td>per-step waterfall: prompt, response, tokens, latency</td></tr>
+</table>
+<p>In Phase 6 you read both together: Grafana tells you the GPU is KV-bound and queuing (the machine cause); Langfuse tells you <code>verify</code> fires on every question and doubles the LLM work (the logic cause). The eval then confirms whether a speed fix hurt quality. You can only see all three because you built all three instruments.</p>
+
+</div>
+</body>
+</html>

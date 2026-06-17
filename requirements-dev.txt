@@ -1,0 +1,24 @@
+# Agent-only dependencies for local (off-GPU) development.
+#
+# The project's pyproject.toml pins `vllm`, which only builds on Linux+CUDA and
+# will NOT install on macOS. You don't need vllm to run the AGENT - the agent
+# just speaks the OpenAI HTTP API. So on a Mac, install these instead of
+# `uv sync`, point VLLM_BASE_URL at OpenAI (or a remote vLLM), and you can build
+# and test Phases 3-5 with no GPU.
+#
+#   uv venv .venv-dev --python 3.12
+#   uv pip install --python .venv-dev -r requirements-dev.txt
+#
+# On the GPU VM (Linux), ignore this file and use `uv sync` to get vllm too.
+
+langgraph>=1.0,<2.0
+langchain>=1.0,<2.0
+langchain-openai>=1.0,<2.0
+langfuse>=4.0,<5.0
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.0,<3.0
+python-dotenv>=1.0,<2.0
+httpx>=0.27,<1.0
+aiohttp>=3.9,<4.0
+tqdm>=4.66,<5.0

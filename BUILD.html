@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BUILD — text-to-SQL MLOps assignment</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --surface:#ffffff; --surface2:#f1efe8; --text:#2c2c2a;
+    --muted:#5f5e5a; --border:#dcdace; --accent:#534ab7;
+    --code-bg:#f1efe8; --teal:#0f6e56; --amber:#854f0b; --coral:#993c1d; --blue:#185fa5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1d1d1b; --surface:#262624; --surface2:#2f2f2c; --text:#ecebe6;
+      --muted:#b4b2a9; --border:#3a3a36; --accent:#afa9ec; --code-bg:#2f2f2c;
+      --teal:#5dcaa5; --amber:#ef9f27; --coral:#f0997b; --blue:#85b7eb; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.7;font-size:16px}
+  .wrap{max-width:880px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:30px;font-weight:600;margin:0 0 4px}
+  h2{font-size:22px;font-weight:600;margin:48px 0 10px;padding-top:14px;border-top:1px solid var(--border)}
+  h3{font-size:17px;font-weight:600;margin:26px 0 6px}
+  p{margin:10px 0}
+  .lead{color:var(--muted);font-size:18px;margin-top:0}
+  code{background:var(--code-bg);padding:2px 6px;border-radius:5px;font-size:.9em;
+    font-family:"SF Mono",Menlo,Consolas,monospace}
+  pre{background:var(--code-bg);padding:14px 16px;border-radius:10px;overflow:auto;
+    border:1px solid var(--border)}
+  pre code{background:none;padding:0}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:15px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600}
+  .nav{display:flex;gap:16px;margin:18px 0 0;flex-wrap:wrap}
+  .nav a{color:var(--accent);text-decoration:none;font-size:15px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .callout{background:var(--surface2);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;
+    padding:12px 16px;margin:16px 0}
+  .grid2{display:flex;gap:16px;flex-wrap:wrap}
+  .grid2>div{flex:1;min-width:260px}
+  .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:20px;background:var(--surface2);color:var(--muted)}
+  svg{max-width:100%;height:auto;display:block;margin:8px 0}
+  .b{font-weight:600}
+  .pill-done{color:var(--teal);font-weight:600}
+  .pill-gpu{color:var(--amber);font-weight:600}
+  figcaption{color:var(--muted);font-size:14px;margin-top:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>BUILD — assembling the system</h1>
+<p class="lead">What we set up, why each piece exists, and how to read the code. The companion <a href="RUN.html">RUN.html</a> covers actually running it.</p>
+<div class="nav">
+  <a href="#what">1. What it is</a>
+  <a href="#files">2. Provided vs ours</a>
+  <a href="#steps">3. Build steps</a>
+  <a href="#envs">4. Two environments</a>
+  <a href="#docker">5. Docker &amp; compose</a>
+  <a href="#dockerfile">6. The Dockerfile</a>
+  <a href="#code">7. Code structure</a>
+  <a href="#status">8. Status</a>
+</div>
+
+<h2 id="what">1. What we are building</h2>
+<p>An analyst asks a question in English; the system writes SQL, runs it against a database, checks the result, and retries if it looks wrong. The model itself (Qwen3-30B) is served by <span class="b">vLLM</span>; a <span class="b">LangGraph</span> agent wraps it with a verify/revise loop; two observability stacks watch the machine (<span class="b">Prometheus + Grafana</span>) and the logic (<span class="b">Langfuse</span>).</p>
+
+<figure>
+<svg viewBox="0 0 840 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="System architecture">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round"/></marker></defs>
+  <g font-family="-apple-system,sans-serif" font-size="13">
+  <rect x="20" y="20" width="150" height="44" rx="8" fill="#eeedfe" stroke="#534ab7"/>
+  <text x="95" y="40" text-anchor="middle" fill="#3c3489" font-weight="600">Client</text>
+  <text x="95" y="56" text-anchor="middle" fill="#534ab7">browser / eval / load</text>
+
+  <rect x="20" y="130" width="320" height="150" rx="10" fill="none" stroke="#534ab7" stroke-dasharray="5 3"/>
+  <text x="32" y="150" fill="#534ab7" font-size="12">Agent server :8001 (LangGraph)</text>
+  <rect x="40" y="162" width="130" height="38" rx="7" fill="#eeedfe" stroke="#534ab7"/><text x="105" y="186" text-anchor="middle" fill="#3c3489">generate_sql</text>
+  <rect x="40" y="212" width="130" height="38" rx="7" fill="#eeedfe" stroke="#534ab7"/><text x="105" y="236" text-anchor="middle" fill="#3c3489">execute</text>
+  <rect x="190" y="162" width="130" height="38" rx="7" fill="#eeedfe" stroke="#534ab7"/><text x="255" y="186" text-anchor="middle" fill="#3c3489">verify</text>
+  <rect x="190" y="212" width="130" height="38" rx="7" fill="#faece7" stroke="#993c1d"/><text x="255" y="236" text-anchor="middle" fill="#993c1d">revise</text>
+
+  <rect x="430" y="20" width="170" height="48" rx="8" fill="#e6f1fb" stroke="#185fa5"/>
+  <text x="515" y="40" text-anchor="middle" fill="#0c447c" font-weight="600">vLLM :8000</text>
+  <text x="515" y="57" text-anchor="middle" fill="#185fa5">Qwen3-30B on H100</text>
+
+  <rect x="430" y="232" width="170" height="48" rx="8" fill="#e1f5ee" stroke="#0f6e56"/>
+  <text x="515" y="252" text-anchor="middle" fill="#085041" font-weight="600">SQLite (BIRD)</text>
+  <text x="515" y="269" text-anchor="middle" fill="#0f6e56">data/bird/*.sqlite</text>
+
+  <rect x="670" y="20" width="150" height="44" rx="8" fill="#faeeda" stroke="#854f0b"/><text x="745" y="40" text-anchor="middle" fill="#633806" font-weight="600">Prometheus</text><text x="745" y="56" text-anchor="middle" fill="#854f0b">:9090</text>
+  <rect x="670" y="92" width="150" height="44" rx="8" fill="#faeeda" stroke="#854f0b"/><text x="745" y="112" text-anchor="middle" fill="#633806" font-weight="600">Grafana</text><text x="745" y="128" text-anchor="middle" fill="#854f0b">:3000</text>
+  <rect x="670" y="232" width="150" height="44" rx="8" fill="#eaf3de" stroke="#3b6d11"/><text x="745" y="252" text-anchor="middle" fill="#27500a" font-weight="600">Langfuse</text><text x="745" y="268" text-anchor="middle" fill="#3b6d11">:3001</text>
+
+  <line x1="95" y1="64" x2="95" y2="130" stroke="#888780" stroke-width="1.4" marker-end="url(#ah)"/>
+  <line x1="320" y1="181" x2="430" y2="44" stroke="#888780" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ah)"/>
+  <text x="350" y="120" fill="#5f5e5a" font-size="11">LLM calls</text>
+  <line x1="170" y1="231" x2="430" y2="252" stroke="#888780" stroke-width="1.4" marker-end="url(#ah)"/>
+  <line x1="600" y1="44" x2="668" y2="44" stroke="#888780" stroke-width="1.4" marker-end="url(#ah)"/>
+  <text x="606" y="38" fill="#5f5e5a" font-size="11">/metrics</text>
+  <line x1="745" y1="64" x2="745" y2="92" stroke="#888780" stroke-width="1.4" marker-end="url(#ah)"/>
+  <line x1="340" y1="270" x2="668" y2="254" stroke="#888780" stroke-width="1.4" stroke-dasharray="5 3" marker-end="url(#ah)"/>
+  <text x="430" y="300" fill="#5f5e5a" font-size="11">traces (spans, prompts, tokens)</text>
+  </g>
+</svg>
+<figcaption>Solid = synchronous call. Dashed = LLM / telemetry. Each port is forwarded over SSH to your laptop.</figcaption>
+</figure>
+
+<h2 id="files">2. Provided scaffolding vs. what we wrote</h2>
+<p>This repo is a fill-in-the-blanks template. The graders' harness expects the provided files to behave as shipped; the graded work is the implementations and the report.</p>
+<div class="grid2">
+  <div class="card">
+    <p><span class="tag">provided — don't touch</span></p>
+    <p><code>agent/execution.py</code> runs SQL read-only, renders rows.<br>
+    <code>agent/schema.py</code> reads sqlite → CREATE TABLE text.<br>
+    <code>agent/server.py</code> FastAPI <code>/answer</code> + Langfuse hook.<br>
+    <code>docker-compose.yml</code> the whole o11y stack.<br>
+    <code>infra/prometheus.yml</code> scrape config.<br>
+    <code>scripts/load_data.py</code> downloads BIRD (deterministic).<br>
+    <code>load_test/driver.py</code> async RPS generator.</p>
+  </div>
+  <div class="card">
+    <p><span class="tag">we wrote — graded</span></p>
+    <p><code>agent/prompts.py</code> all 6 prompts (were empty).<br>
+    <code>agent/graph.py</code> verify, revise, router, JSON helper.<br>
+    <code>evals/run_eval.py</code> eval_one + summarize.<br>
+    <code>infra/.../serving.json</code> Grafana dashboard (11 panels).<br>
+    Added: <code>requirements-dev.txt</code>, <code>Dockerfile</code>, <code>.dockerignore</code>.</p>
+  </div>
+</div>
+<div class="callout"><span class="b">Why not rewrite the provided files?</span> Zero credit upside and it risks breaking what the harness runs against. "Your work" here means your implementations + report, exactly like starting from a code template.</div>
+
+<h2 id="steps">3. The build sequence (why each step)</h2>
+<table>
+  <tr><th>#</th><th>Action</th><th>What it does</th><th>Why</th></tr>
+  <tr><td>1</td><td><code>git clone</code> → <code>rm -rf .git</code> → <code>git init</code></td><td>Pull scaffolding, make it your repo</td><td>Get the template; cut provenance so submission is yours</td></tr>
+  <tr><td>2</td><td><code>cp .env.example .env</code></td><td>Create config file</td><td>One place for keys + backend URL; gitignored</td></tr>
+  <tr><td>3</td><td><code>uv sync</code> (VM) / <code>requirements-dev.txt</code> (Mac)</td><td>Install deps</td><td>vllm only builds on Linux+CUDA; Mac skips it</td></tr>
+  <tr><td>4</td><td><code>load_data.py</code></td><td>Download BIRD → sqlite + eval set</td><td>The DBs + the 30 graded questions. Pure stdlib, runs anywhere</td></tr>
+  <tr><td>5</td><td><code>docker compose up -d</code></td><td>Start Prometheus, Grafana, Langfuse</td><td>Both observability stacks. Runs anywhere with Docker</td></tr>
+  <tr><td>6</td><td>write prompts/graph/eval/dashboard</td><td>The agent brain + scorer + panels</td><td>The graded logic — done</td></tr>
+  <tr><td>7</td><td><code>uvicorn agent.server:app</code></td><td>Start the agent HTTP server</td><td>What curl / eval / load test all call</td></tr>
+  <tr><td>8</td><td><span class="pill-gpu">GPU</span> <code>start_vllm.sh</code></td><td>Serve Qwen3-30B</td><td>The only step that truly needs the H100</td></tr>
+</table>
+
+<h2 id="envs">4. Two environments: your Mac vs. the GPU VM</h2>
+<p>The same code runs in both places; only the LLM backend differs. This is what lets us build everything off-GPU now.</p>
+<table>
+  <tr><th></th><th>Your Mac (build / debug)</th><th>Cloud VM (real numbers)</th></tr>
+  <tr><td>Deps</td><td><code>requirements-dev.txt</code> (no vllm)</td><td><code>uv sync</code> (with vllm)</td></tr>
+  <tr><td>LLM backend</td><td>OpenAI API (a key)</td><td>local vLLM on H100</td></tr>
+  <tr><td>Can run</td><td>agent, eval logic, schema/exec, Docker o11y</td><td>everything incl. SLO + real eval pass rates</td></tr>
+  <tr><td>Cannot</td><td>serve vLLM; produce reportable latency</td><td>—</td></tr>
+</table>
+
+<h2 id="docker">5. Docker &amp; docker-compose — concepts + how to read</h2>
+<p>There is no Dockerfile for the o11y stack — <code>docker-compose.yml</code> pulls <span class="b">pre-built public images</span> and wires them together. The mental model:</p>
+<table>
+  <tr><td class="b">Image</td><td>frozen, read-only app template (like a class)</td></tr>
+  <tr><td class="b">Container</td><td>a running instance of an image (like an object), disposable</td></tr>
+  <tr><td class="b">Volume</td><td>disk that survives restarts — keeps your Grafana/Langfuse data</td></tr>
+  <tr><td class="b">Port map</td><td><code>"3000:3000"</code> = host_port:container_port</td></tr>
+  <tr><td class="b">Network</td><td>compose puts services on one private net; they reach each other by name (<code>postgres:5432</code>)</td></tr>
+</table>
+<p>Reading a service block:</p>
+<pre><code>services:
+  grafana:                         # service name = hostname on the private net
+    image: grafana/grafana:11.3.0  # which prebuilt image + pinned version
+    ports:
+      - "3000:3000"                # VM:3000 -&gt; container:3000  (you SSH-forward 3000)
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro  # host:container:read-only
+      - grafana-data:/var/lib/grafana                              # named volume, persists
+    depends_on:
+      - prometheus                 # start prometheus first</code></pre>
+<p>Three patterns to recognize:</p>
+<ul>
+  <li><span class="b">depends_on + healthcheck</span> — Langfuse waits for Postgres/ClickHouse/Redis/MinIO to be <em>actually ready</em> (e.g. <code>pg_isready</code>), which is why first boot is slow.</li>
+  <li><span class="b">extra_hosts: host.docker.internal:host-gateway</span> on Prometheus — the bridge from inside a container to the <em>host</em>. vLLM runs on the host, so Prometheus scrapes <code>host.docker.internal:8000</code>. That one line is why scraping works.</li>
+  <li><span class="b">&amp;langfuse-env anchor</span> — a YAML reuse trick: define ~25 env vars once, splat into two services with <code>&lt;&lt;: *langfuse-env</code>.</li>
+</ul>
+
+<h2 id="dockerfile">6. The agent Dockerfile (optional)</h2>
+<p>The assignment never asks for this — on the VM you just run uvicorn. We added one to show the structure. Key idea: <span class="b">each line is a cached layer; order steps so editing code doesn't reinstall packages.</span></p>
+<pre><code>FROM python:3.12-slim         # 1. small official base
+WORKDIR /app                  # 2. where code lives in the container
+COPY requirements-dev.txt .   # 3. deps manifest FIRST (rarely changes)
+RUN pip install -r requirements-dev.txt   #    cached unless the manifest changes
+COPY agent/ ./agent/          # 4. code LAST (changes often)
+EXPOSE 8001                   # 5. document the port
+CMD ["uvicorn","agent.server:app","--host","0.0.0.0","--port","8001"]  # 6. the process</code></pre>
+<div class="callout">It installs <span class="b">only</span> agent deps — never vllm. vLLM stays on the host GPU; the container reaches it via <code>host.docker.internal:8000</code>.</div>
+
+<h2 id="code">7. How to read the code we wrote</h2>
+<p>Every LLM node follows the same shape as the provided <code>generate_sql_node</code> — learn it once. LangGraph nodes don't mutate state; they <span class="b">return a dict of changed fields</span> and the framework merges it.</p>
+<pre><code>def verify_node(state):
+    result_view = state.execution.render() if state.execution else "NO EXECUTION RESULT"
+    response = llm().invoke([
+        ("system", prompts.VERIFY_SYSTEM),                # who you are + rules
+        ("user",   prompts.VERIFY_USER.format(            # the task, data filled in
+            question=state.question, sql=state.sql, result=result_view)),
+    ])
+    verdict = _parse_json_object(response.content)        # tolerate prose/fences
+    ok    = bool(verdict.get("ok", False))                # safe default if key missing
+    issue = str(verdict.get("issue", "")).strip()
+    return {"verify_ok": ok, "verify_issue": issue, "history": state.history + [...]}</code></pre>
+<p><span class="b">Design decision worth defending:</span> if JSON parsing fails we default <code>ok=False</code>, so a garbled verifier triggers a revise rather than blindly accepting the answer — fail toward more checking.</p>
+<p>The router is just an if-ladder returning a label the graph maps to a node:</p>
+<pre><code>def route_after_verify(state):
+    if state.verify_ok:                   return "end"   # happy
+    if state.iteration >= MAX_ITERATIONS: return "end"   # out of budget
+    return "revise"                                      # loop</code></pre>
+<p>The eval's clever bit (<code>eval_one</code> / <code>summarize</code>): the agent returns its <code>history</code>, so we re-run the SQL it produced <em>at each iteration</em> against the DB and compare to gold. <code>summarize</code> then asks "what would the pass rate be if we'd stopped at iteration k?" with carry-forward. If iter-0 == last, the loop is decoration; if last is higher, it earns its keep — the whole point of Phase 5.</p>
+
+<h2 id="status">8. Status — what is done off-GPU</h2>
+<table>
+  <tr><th>Item</th><th>State</th></tr>
+  <tr><td>Repo set up as yours (fresh git)</td><td class="pill-done">done</td></tr>
+  <tr><td>BIRD data: 11 DBs, 30 eval Qs, 1500 perf Qs</td><td class="pill-done">done</td></tr>
+  <tr><td>Agent prompts + verify/revise/router</td><td class="pill-done">done, compiles</td></tr>
+  <tr><td>Eval runner (eval_one + summarize)</td><td class="pill-done">done, compiles</td></tr>
+  <tr><td>Grafana dashboard JSON (11 panels)</td><td class="pill-done">done, valid</td></tr>
+  <tr><td>Agent imports + server <code>/health</code> on Mac</td><td class="pill-done">verified</td></tr>
+  <tr><td>End-to-end <code>/answer</code> + eval pass rates</td><td class="pill-gpu">needs an LLM key or the GPU</td></tr>
+  <tr><td>vLLM config, SLO load test, REPORT.md</td><td class="pill-gpu">needs the H100</td></tr>
+</table>
+<p>See <a href="RUN.html">RUN.html</a> for the exact commands to fire each of these.</p>
+
+</div>
+</body>
+</html>

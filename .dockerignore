@@ -1,0 +1,14 @@
+# Keep the build context small + the image clean. Anything matched here is NOT
+# sent to the Docker daemon, so it can't bloat layers or leak secrets.
+.git
+.venv
+.venv-dev
+__pycache__
+*.pyc
+.env
+data/
+results/
+screenshots/
+*.md
+*.html
+uv.lock
