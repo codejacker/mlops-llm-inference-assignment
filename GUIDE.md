@@ -1,147 +1,283 @@
-# Submission guide & checklist
+# Submission guide & checklist (exact steps)
 
-A phase-by-phase plan derived from the README: what to do, the deliverable it
-produces, **where that deliverable comes from**, and **where to put it**. Items
-already done off-GPU are checked. See `BUILD.html` / `RUN.html` for the concepts.
+Phase-by-phase plan from the README, with the **exact commands** for both
+machines, what each deliverable **is and where it comes from**, and where to put
+it. Concepts live in `BUILD.html` / `RUN.html`.
 
-Legend: `[x]` done · `[ ]` to do · 🖥️ needs the H100 VM · 💻 doable on your Mac
+Legend: `[x]` done · `[ ]` to do · 💻 = on your Mac · 🖥️ = on the Nebius VM
 
 ---
 
-## Phase 0 — Setup
+## The two machines
 
-- [x] 💻 Repo is yours (fresh git history)
-- [x] 💻 `.env` created from `.env.example`
-- [x] 💻 BIRD data loaded → `data/bird/` (11 DBs, 30 eval Qs, 1500 perf Qs)
-- [ ] 🖥️ On the VM: forward 5 ports (3000, 9090, 3001, 8000, 8001), `uv sync`, `docker compose up -d`
-- [ ] 🖥️ Confirm 3 UIs load: Prometheus `:9090`, Grafana `:3000` (admin/admin), Langfuse `:3001`
+| | 💻 Your Mac | 🖥️ Nebius VM (1× H100) |
+|---|---|---|
+| Role | edit code, build/debug agent off-GPU | serve vLLM, get real latency + pass rates |
+| LLM backend | OpenAI API (a key) — optional | local vLLM on the H100 |
+| Deps | `requirements-dev.txt` (no vllm) | `uv sync` (with vllm) |
+| Already set up | `.venv-dev`, BIRD data, agent verified | nothing yet |
 
-**Deliverable:** none (environment only).
+The **same repo** runs on both. Push from one, pull on the other. Only the LLM
+backend differs (set via `.env`).
+
+---
+
+## Part A — Provision & connect to the Nebius VM 🖥️
+
+Console: https://console.nebius.com/project-e00xjwkcpr00g4bffh44de/compute
+
+1. **Create an SSH key on your Mac** (if you don't have one):
+   ```bash
+   ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -C "edenl14@gmail.com"
+   cat ~/.ssh/id_ed25519.pub      # copy this line
+   ```
+2. **Create the VM** in the console → *Compute* → *Create virtual machine*:
+   - Platform / preset: a GPU platform with **1× H100** (e.g. `gpu-h100-sxm`, 1 GPU).
+   - Image: an **Ubuntu + CUDA** image (so NVIDIA drivers are preinstalled). Verify `nvidia-smi` works after boot.
+   - Disk: ≥ 200 GB (the Qwen3-30B weights are large).
+   - SSH key: paste your `id_ed25519.pub`. Default user is usually `ubuntu`.
+   - Create, then copy the VM's **public IP** from the VM details page.
+3. **Connect with all five ports forwarded** (run on your Mac, keep it open):
+   ```bash
+   ssh -L 3000:localhost:3000 \
+       -L 9090:localhost:9090 \
+       -L 3001:localhost:3001 \
+       -L 8000:localhost:8000 \
+       -L 8001:localhost:8001 \
+       ubuntu@<VM_PUBLIC_IP>
+   ```
+   *Logic:* the VM's UIs listen on its `localhost`; `-L` tunnels your laptop's
+   ports to them so `http://localhost:3000` in your browser hits Grafana on the VM.
+4. **Verify the GPU**: `nvidia-smi` → should list one H100.
+
+> Stop the VM in the console when not in use — H100 time is billed by the hour.
+
+---
+
+## Part B — One-time setup
+
+### 💻 On your Mac (already done — for reference)
+```bash
+cp .env.example .env
+uv venv .venv-dev --python 3.12
+uv pip install --python .venv-dev -r requirements-dev.txt
+python3 scripts/load_data.py            # pure stdlib, no GPU
+```
+
+### 🖥️ On the VM (do this after connecting)
+```bash
+# install prerequisites if the image lacks them
+sudo apt-get update && sudo apt-get install -y python3-dev git docker.io docker-compose-plugin
+sudo usermod -aG docker $USER && newgrp docker     # run docker without sudo
+curl -LsSf https://astral.sh/uv/install.sh | sh    # install uv
+source ~/.bashrc
+
+git clone https://github.com/codejacker/mlops-llm-inference-assignment
+cd mlops-llm-inference-assignment
+uv sync                                  # installs vllm + everything
+cp .env.example .env
+uv run python scripts/load_data.py       # BIRD data on the VM too
+docker compose up -d                     # Prometheus + Grafana + Langfuse
+docker compose ps                        # all services should be "running"/"healthy"
+```
+**Deliverable:** none (environment). **Logic:** `uv sync` gives you vllm (Linux+CUDA
+only); `docker compose up` brings up both observability stacks; `load_data.py`
+puts the sqlite DBs + the 30 graded questions under `data/bird/`.
+
+- [x] 💻 Mac env + data ready
+- [ ] 🖥️ VM env + data + docker stack up
+- [ ] 🖥️ 3 UIs load via the tunnel: Prometheus `:9090`, Grafana `:3000` (admin/admin), Langfuse `:3001`
 
 ---
 
 ## Phase 1 — vLLM serving 🖥️
 
-Steps: start vLLM with chosen flags → confirm it loads and returns sensible SQL
-on 3–5 questions from `evals/eval_set.jsonl` → write the config down.
+**Goal:** serve the model with flags chosen for this workload.
 
-- [ ] vLLM serving Qwen3-30B at `localhost:8000`
-- [ ] A few manual queries return sensible SQL
-- [ ] **Deliverable:** screenshot of vLLM serving + a manual query → `screenshots/vllm_manual_query.png`
-- [ ] **Deliverable:** your flags + one-line justifications → section in `REPORT.md`
+```bash
+# edit scripts/start_vllm.sh to add your flags, then:
+bash scripts/start_vllm.sh
+# example starting point inside the script:
+#   uv run python -m vllm.entrypoints.openai.api_server \
+#     --model Qwen/Qwen3-30B-A3B-Instruct-2507 --host 0.0.0.0 --port 8000 \
+#     --max-model-len 4096 --gpu-memory-utilization 0.90 --max-num-seqs 256
 
-*Comes from:* running `scripts/start_vllm.sh` (add your flags) and a `curl` to `:8000/v1/chat/completions`.
+# in a SECOND VM shell (or tmux pane), confirm it loaded:
+curl localhost:8000/v1/models
+# fire a manual question (this is your screenshot):
+curl -s localhost:8000/v1/chat/completions -H 'content-type: application/json' -d '{
+  "model":"Qwen/Qwen3-30B-A3B-Instruct-2507",
+  "messages":[{"role":"user","content":"Write SQLite SQL: how many rows in a table named circuits?"}]
+}' | python3 -m json.tool
+```
 
----
+**Deliverables & logic:**
+- `screenshots/vllm_manual_query.png` — proves the model serves and returns SQL. *Comes from:* screenshot the terminal showing vLLM running + the curl reply.
+- `REPORT.md` §1 — your flags + one-line justifications. *Logic:* shows you tuned for the MoE / long-prompt / short-output shape, not defaults.
 
-## Phase 2 — Observability dashboard 💻 build / 🖥️ verify
-
-Steps: extend the starter dashboard to cover latency (percentiles), throughput,
-KV cache, drawing metrics from vLLM `/metrics`.
-
-- [x] 💻 Dashboard JSON written (11 panels: latency / throughput / KV cache) → `infra/grafana/provisioning/dashboards/serving.json`
-- [ ] 🖥️ Every panel visibly reacts when you fire requests
-- [ ] **Deliverable:** screenshot of the full dashboard reacting to a burst → `screenshots/grafana_serving.png`
-- [x] **Deliverable:** dashboard JSON committed under `infra/grafana/provisioning/dashboards/`
-
-*Comes from:* the JSON is done; the screenshot comes from Grafana on the VM under load.
-
----
-
-## Phase 3 — Agent 💻
-
-Steps: implement the LLM nodes, write prompts, wire the verify→revise loop with
-an iteration cap, test interactively.
-
-- [x] `verify`, `revise`, `route_after_verify` implemented → `agent/graph.py`
-- [x] All 6 prompts written → `agent/prompts.py`
-- [x] Loop wired with cap (`MAX_ITERATIONS = 3`)
-- [ ] 🖥️ Run server, confirm ≥1 question triggers a revise (final tuning on real Qwen3)
-- [x] **Deliverable:** implemented `agent/graph.py` + `agent/prompts.py` (in repo)
-
-*Comes from:* the code is done; the "triggers a revise" check is observed at run time (see it in `history` or in Langfuse).
+- [ ] vLLM serving at `:8000`, manual query returns SQL
+- [ ] screenshot saved · REPORT §1 filled
 
 ---
 
-## Phase 4 — Agent tracing (Langfuse) 🖥️ (or 💻 with a key)
+## Phase 2 — Observability dashboard (💻 built / 🖥️ verify)
 
-Steps: create a local Langfuse project, grab keys → `.env`, fire 10 questions,
-inspect a trace, tag traces with metadata.
+**Goal:** dashboard covering latency percentiles, throughput, KV cache.
 
-- [ ] Sign up at `localhost:3001`, create project, copy public + secret keys
-- [ ] Paste keys into `.env` (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`)
-- [ ] Fire 10 questions; confirm the generate/verify/(revise) waterfall appears
-- [ ] **Deliverable:** screenshot of one trace's waterfall → `screenshots/langfuse_trace.png`
-- [ ] **Deliverable:** screenshot of the trace list with your tags → `screenshots/langfuse_tags.png`
+The JSON is **done** (`infra/grafana/provisioning/dashboards/serving.json`, 11
+panels). Grafana auto-loads it on `docker compose up`. To verify it reacts:
+```bash
+# 🖥️ generate some load so panels move, then screenshot Grafana:
+uv run python load_test/driver.py --rps 5 --duration 60
+```
+Open `http://localhost:3000` (via tunnel) → dashboard "vLLM serving".
 
-*Comes from:* the Langfuse hook is already wired in `agent/server.py`; just supply keys and tags. Pass tags via the `/answer` request body's `tags` field.
+**Deliverables & logic:**
+- `serving.json` (committed) — *done*. *Logic:* the panels answer "is it slow, and where in the request lifecycle?" (e2e vs TTFT vs decode vs queue) plus KV headroom.
+- `screenshots/grafana_serving.png` — *Comes from:* screenshot the full dashboard while the load above runs.
 
----
-
-## Phase 5 — Evals 💻 logic / 🖥️ real numbers
-
-Steps: implement the eval runner (execution accuracy + per-iteration pass rate),
-run baseline, read whether the loop earns its keep.
-
-- [x] `eval_one` + `summarize` implemented → `evals/run_eval.py`
-- [ ] 🖥️ Run baseline against the 30B endpoint
-- [ ] **Deliverable:** baseline results (overall + per-iteration pass rate) → `results/eval_baseline.json`
-- [ ] **Deliverable:** screenshot of Grafana while the eval runs → `screenshots/grafana_eval_run.png`
-- [ ] Note in `REPORT.md`: is the loop doing real work? (compare iter-0 vs last)
-
-*Comes from:* `uv run python evals/run_eval.py --out results/eval_baseline.json` (writes the JSON itself).
+- [x] dashboard JSON
+- [ ] 🖥️ panels react under load · screenshot saved
 
 ---
 
-## Phase 6 — SLO diagnosis & iteration 🖥️ (highest weight, 25%)
+## Phase 3 — Agent (💻 done / 🖥️ confirm)
 
-Target: **P95 end-to-end agent latency < 5s at 10+ RPS over 5 min.**
-Steps: load test → diagnose from the dashboard → change one thing → re-measure →
-log it → re-eval to check quality survived.
+**Goal:** verify→revise loop with an iteration cap. **Code is done.** Confirm on
+the real model that a revise actually fires.
+```bash
+# 🖥️ start the agent (points at local vLLM by default):
+uv run uvicorn agent.server:app --host 0.0.0.0 --port 8001
+# in another shell, ask something; look for >1 entry with "sql" in history:
+curl -s localhost:8001/answer -H 'content-type: application/json' \
+  -d '{"question":"List the names of all circuits in Italy.","db":"formula_1"}' | python3 -m json.tool
+```
+*(💻 To test on the Mac instead: set OpenAI keys in `.env`, then
+`.venv-dev/bin/uvicorn agent.server:app --port 8001`.)*
 
-- [ ] Run `uv run python load_test/driver.py --rps 10 --duration 300`, watch Grafana
-- [ ] **Deliverable:** before/after screenshots of the change that moved the needle → `screenshots/grafana_before.png`, `screenshots/grafana_after.png`
-- [ ] **Deliverable:** post-tuning eval → `results/eval_after_tuning.json` (re-run the eval, change `--out`)
-- [ ] **Deliverable:** iteration log "saw X → hypothesized Y → changed Z → result W" → section in `REPORT.md`
-- [ ] Honest verdict: SLO hit, or missed with the gap quantified → `REPORT.md`
+**Deliverables & logic:**
+- `agent/graph.py`, `agent/prompts.py` (committed) — *done*. *Logic:* `iterations > 1` or a `revise` node in `history` proves the loop does real work.
 
-*Comes from:* the load driver + dashboard; each iteration = one note + one screenshot.
+- [x] code done
+- [ ] 🖥️ confirmed ≥1 question triggers a revise
+
+---
+
+## Phase 4 — Agent tracing (Langfuse) 🖥️
+
+**Goal:** capture per-step traces; tag them for Phase 6.
+1. Open `http://localhost:3001` → sign up (local, instant) → project is auto-created ("Default").
+2. *Settings → API Keys* → create → copy **public** + **secret** keys.
+3. Add to `.env`:
+   ```
+   LANGFUSE_PUBLIC_KEY=pk-...
+   LANGFUSE_SECRET_KEY=sk-...
+   LANGFUSE_HOST=http://localhost:3001
+   ```
+4. Restart the agent (it auto-enables the Langfuse hook when keys are present).
+5. Fire ~10 questions **with tags** so they're filterable later:
+   ```bash
+   curl -s localhost:8001/answer -H 'content-type: application/json' \
+     -d '{"question":"How many drivers are there?","db":"formula_1","tags":{"run":"baseline"}}'
+   ```
+6. In Langfuse, open a trace → see the `generate_sql / verify / (revise)` waterfall.
+
+**Deliverables & logic:**
+- `screenshots/langfuse_trace.png` — the waterfall of one request. *Logic:* this is your agent x-ray; in Phase 6 it tells you *which step* is slow.
+- `screenshots/langfuse_tags.png` — the trace list showing your metadata tags.
+
+- [ ] keys in `.env` · traces appear · both screenshots saved
+
+---
+
+## Phase 5 — Evals (💻 logic done / 🖥️ real numbers)
+
+**Goal:** execution accuracy + per-iteration pass rate on the 30B endpoint.
+```bash
+# 🖥️ agent must be running; this hits ~60 vLLM calls (watch Grafana):
+uv run python evals/run_eval.py --out results/eval_baseline.json
+cat results/eval_baseline.json | python3 -m json.tool | head -20
+```
+
+**Deliverables & logic:**
+- `results/eval_baseline.json` — *written by the runner itself.* Contains overall + `pass_rate_by_iteration`.
+- `screenshots/grafana_eval_run.png` — screenshot Grafana during the run.
+- `REPORT.md` §2 — *Logic:* compare `pass_rate_by_iteration[0]` (stop after generate) vs the last value. Equal → loop is decoration; higher → it earns its keep.
+
+- [x] eval code
+- [ ] 🖥️ baseline run · json + screenshot · REPORT §2
+
+---
+
+## Phase 6 — SLO diagnosis & iteration 🖥️ (25% — the main event)
+
+**Goal:** P95 < 5s at 10+ RPS over 5 min; diagnose from metrics, fix, prove it.
+```bash
+uv run python load_test/driver.py --rps 10 --duration 300   # watch Grafana live
+```
+Loop: read which metric moves first (queue time? KV cache → 100%? TTFT?) → form
+one hypothesis → change **one** vLLM flag → re-run → confirm that metric moved →
+check if P95 followed. Re-eval after tuning:
+```bash
+uv run python evals/run_eval.py --out results/eval_after_tuning.json
+```
+
+**Deliverables & logic:**
+- `screenshots/grafana_before.png` + `grafana_after.png` — the one change that moved the needle.
+- `results/eval_after_tuning.json` — *Logic:* proves a speed fix didn't tank quality.
+- `REPORT.md` §3 — the "saw X → hypothesized Y → changed Z → result W" log. *Logic:* diagnosis quality is graded above hitting the number.
+
+- [ ] 🖥️ load test · before/after screenshots · after-tuning eval · REPORT §3
 
 ---
 
 ## Phase 7 — Report 💻
 
-- [ ] **Deliverable:** `REPORT.md` (≤ 3 pages) with: 1) serving config + justification, 2) baseline eval (overall + per-iteration), 3) SLO cycle (baseline vs SLO, iteration log, final numbers), 4) agent value paragraph (cite per-iteration pass rate), 5) what you'd do with more time (specific).
+Finish `REPORT.md` (skeleton already in the repo): §1 config, §2 baseline eval,
+§3 SLO cycle, §4 agent value (cite per-iteration pass rate), §5 specific
+next steps. ≤ 3 pages, honest about misses.
+
+- [ ] REPORT.md complete
 
 ---
 
-## Master deliverables checklist (the grader's table)
+## Master deliverables checklist
 
-| Deliverable | Phase | Where it lives | Status |
+| Deliverable | Phase | Where it comes from | Status |
 |---|---|---|---|
-| `agent/graph.py`, `agent/prompts.py` | 3 | repo | [x] done |
-| `evals/run_eval.py` | 5 | repo | [x] done |
-| `infra/grafana/provisioning/dashboards/serving.json` | 2 | repo | [x] done |
-| `results/eval_baseline.json` | 5 | written by eval runner | [ ] 🖥️ |
-| `results/eval_after_tuning.json` | 6 | written by eval runner (`--out`) | [ ] 🖥️ |
-| `screenshots/vllm_manual_query.png` | 1 | save manually | [ ] 🖥️ |
-| `screenshots/grafana_serving.png` | 2 | save manually | [ ] 🖥️ |
-| `screenshots/langfuse_trace.png` | 4 | save manually | [ ] 🖥️ |
-| `screenshots/langfuse_tags.png` | 4 | save manually | [ ] 🖥️ |
-| `screenshots/grafana_eval_run.png` | 5 | save manually | [ ] 🖥️ |
-| `screenshots/grafana_before.png` | 6 | save manually | [ ] 🖥️ |
-| `screenshots/grafana_after.png` | 6 | save manually | [ ] 🖥️ |
+| `agent/graph.py`, `agent/prompts.py` | 3 | written | [x] |
+| `evals/run_eval.py` | 5 | written | [x] |
+| `infra/grafana/provisioning/dashboards/serving.json` | 2 | written | [x] |
+| `results/eval_baseline.json` | 5 | eval runner output | [ ] 🖥️ |
+| `results/eval_after_tuning.json` | 6 | eval runner output (`--out`) | [ ] 🖥️ |
+| `screenshots/vllm_manual_query.png` | 1 | terminal screenshot | [ ] 🖥️ |
+| `screenshots/grafana_serving.png` | 2 | Grafana under load | [ ] 🖥️ |
+| `screenshots/langfuse_trace.png` | 4 | Langfuse UI | [ ] 🖥️ |
+| `screenshots/langfuse_tags.png` | 4 | Langfuse UI | [ ] 🖥️ |
+| `screenshots/grafana_eval_run.png` | 5 | Grafana during eval | [ ] 🖥️ |
+| `screenshots/grafana_before.png` | 6 | Grafana | [ ] 🖥️ |
+| `screenshots/grafana_after.png` | 6 | Grafana | [ ] 🖥️ |
 | `REPORT.md` | 1,5,6,7 | write as you go | [ ] |
-
-`results/` and `screenshots/` already exist (with `.gitkeep`). Note `.gitignore`
-ignores `results/*.json` and `screenshots/*.png` — when you have the real
-deliverables, force-add them: `git add -f results/*.json screenshots/*.png`.
 
 ---
 
 ## Final submission
 
-1. [ ] All rows in the master table present.
-2. [ ] `REPORT.md` complete (≤ 3 pages, honest about misses).
-3. [ ] Force-add the gitignored deliverables, commit, push.
-4. [ ] Submit your repo URL.
+`.gitignore` excludes `results/*.json` and `screenshots/*.png` — **force-add** the
+real deliverables:
+```bash
+git add -f results/*.json screenshots/*.png
+git add REPORT.md GUIDE.md
+git commit -m "Add GPU-phase deliverables: evals, screenshots, report"
+git push
+```
+Then submit your repo URL: `https://github.com/codejacker/mlops-llm-inference-assignment`
+(make it public first if required: `gh repo edit --visibility public`).
+
+### Moving work between machines
+```bash
+# 💻 after editing on the Mac:
+git add -A && git commit -m "..." && git push
+# 🖥️ on the VM:
+git pull
+```
