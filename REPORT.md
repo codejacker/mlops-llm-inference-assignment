@@ -104,6 +104,16 @@ sustain the offered rate.
 Screenshots: `screenshots/grafana_before.png` (p95 above the 5s line, vLLM idle),
 `screenshots/grafana_after.png` (p95 at/under the line, throughput ~10 req/s).
 
+**Where the latency goes (Langfuse, `screenshots/langfuse_trace.png`).** A
+representative slow trace (7.76s, `codebase_community`) breaks down as
+`generate_sql` 3.78s + `revise` 3.28s + final `verify` 0.68s — and the *first*
+`verify` at **0.00s**, the G4 short-circuit firing on a failed execution (no LLM
+call). ~91% of a slow request is the two generation calls, so the p95 tail is
+exactly the subset of requests that revise. This is the per-node confirmation of
+the fix logic: capping iterations (G3) removes one ~3.3s generation from the
+worst case, which is what pulled p95 under 5s; verify is cheap and, on the error
+path, free.
+
 **Final numbers** (after G3+G4+G5, `results/load_after.json`):
 
 | Metric | Final | SLO | Hit? |
