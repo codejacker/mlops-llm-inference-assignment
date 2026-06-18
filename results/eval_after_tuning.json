@@ -4,13 +4,12 @@
     "overall_pass_rate": 0.3,
     "pass_rate_by_iteration": [
       0.3,
-      0.3,
       0.3
     ],
-    "avg_iterations": 1.57,
+    "avg_iterations": 1.3,
     "errors": 0
   },
-  "wall_clock_seconds": 31.70359009599997,
+  "wall_clock_seconds": 24.28175270400061,
   "results": [
     {
       "db_id": "formula_1",
@@ -22,7 +21,7 @@
       "final_correct": false,
       "final_sql": "SELECT c.lat, c.lng\nFROM circuits c\nJOIN races r ON c.circuitId = r.circuitId\nWHERE r.name = 'Australian Grand Prix';",
       "gold_error": null,
-      "latency_seconds": 0.43850141300026735
+      "latency_seconds": 0.4442567610003607
     },
     {
       "db_id": "superhero",
@@ -34,7 +33,7 @@
       "final_correct": true,
       "final_sql": "SELECT sp.power_name\nFROM superhero s\nJOIN hero_power hp ON s.id = hp.hero_id\nJOIN superpower sp ON hp.power_id = sp.id\nWHERE s.superhero_name = 'Ajax';",
       "gold_error": null,
-      "latency_seconds": 0.4414024840007187
+      "latency_seconds": 0.4172657369999797
     },
     {
       "db_id": "california_schools",
@@ -46,21 +45,20 @@
       "final_correct": true,
       "final_sql": "SELECT s.\"NCESSchool\"\nFROM \"schools\" s\nJOIN \"frpm\" f ON s.\"CDSCode\" = f.\"CDSCode\"\nORDER BY f.\"Enrollment (Ages 5-17)\" DESC\nLIMIT 5;",
       "gold_error": null,
-      "latency_seconds": 0.5681844690006983
+      "latency_seconds": 0.5482536180006718
     },
     {
       "db_id": "financial",
       "question": "What is the average number of crimes committed in 1995 in regions where the number exceeds 4000 and the region has accounts that are opened starting from the year 1997?",
-      "n_iterations": 3,
+      "n_iterations": 2,
       "per_iteration_correct": [
-        false,
         false,
         false
       ],
       "final_correct": false,
       "final_sql": "SELECT AVG(d.A14) AS average_crimes\nFROM district d\nWHERE d.A14 > 4000\n  AND EXISTS (\n    SELECT 1\n    FROM account a\n    WHERE a.district_id = d.district_id\n      AND strftime('%Y', a.date) >= '1997'\n  );",
       "gold_error": null,
-      "latency_seconds": 2.5289395190002324
+      "latency_seconds": 1.5384159129989712
     },
     {
       "db_id": "financial",
@@ -72,7 +70,7 @@
       "final_correct": false,
       "final_sql": "SELECT COUNT(*) \nFROM client c\nJOIN district d ON c.district_id = d.district_id\nWHERE c.gender = 'm' AND d.A2 = 'Hl.m. Praha';",
       "gold_error": null,
-      "latency_seconds": 0.4140654610000638
+      "latency_seconds": 0.4225003379997361
     },
     {
       "db_id": "formula_1",
@@ -84,7 +82,7 @@
       "final_correct": false,
       "final_sql": "SELECT AVG(CAST(SUBSTR(r.fastestLapTime, 1, 2) AS REAL) * 60 + CAST(SUBSTR(r.fastestLapTime, 4, 2) AS REAL) + CAST(SUBSTR(r.fastestLapTime, 7, 3) AS REAL) / 1000) AS average_fastest_lap_time_seconds\nFROM results r\nJOIN drivers d ON r.driverId = d.driverId\nWHERE d.forename = 'Lewis' AND d.surname = 'Hamilton' AND r.fastestLapTime IS NOT NULL;",
       "gold_error": null,
-      "latency_seconds": 0.9673991180006851
+      "latency_seconds": 0.9849491519998992
     },
     {
       "db_id": "formula_1",
@@ -96,7 +94,7 @@
       "final_correct": false,
       "final_sql": "SELECT COUNT(*) \nFROM results \nWHERE raceId BETWEEN 50 AND 100 \n  AND statusId IN (\n    SELECT statusId \n    FROM status \n    WHERE status LIKE '%Disqualified%'\n  );",
       "gold_error": null,
-      "latency_seconds": 0.4370031429998562
+      "latency_seconds": 0.442614940000567
     },
     {
       "db_id": "student_club",
@@ -106,9 +104,9 @@
         true
       ],
       "final_correct": true,
-      "final_sql": "SELECT \n  (SELECT COALESCE(SUM(b.spent), 0) \n   FROM budget b \n   JOIN event e ON b.link_to_event = e.event_id \n   WHERE SUBSTR(e.event_date, 1, 4) = '2019') -\n  (SELECT COALESCE(SUM(b.spent), 0) \n   FROM budget b \n   JOIN event e ON b.link_to_event = e.event_id \n   WHERE SUBSTR(e.event_date, 1, 4) = '2020') AS difference;",
+      "final_sql": "SELECT \n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE e.event_date LIKE '2019-%') -\n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE e.event_date LIKE '2020-%') AS amount_difference;",
       "gold_error": null,
-      "latency_seconds": 0.9284206669999548
+      "latency_seconds": 0.6599560609993205
     },
     {
       "db_id": "california_schools",
@@ -118,23 +116,21 @@
         false
       ],
       "final_correct": false,
-      "final_sql": "SELECT s.\"Street\", s.\"City\", s.\"Zip\", s.\"State\"\nFROM \"schools\" s\nJOIN \"satscores\" ss ON s.\"CDSCode\" = ss.\"cds\"\nORDER BY ss.\"NumGE1500\" * 1.0 / ss.\"NumTstTakr\" ASC\nLIMIT 1;",
+      "final_sql": "SELECT s.Street, s.City, s.Zip, s.State\nFROM schools s\nJOIN satscores ss ON s.CDSCode = ss.cds\nORDER BY ss.NumGE1500 / ss.NumTstTakr ASC\nLIMIT 1;",
       "gold_error": null,
-      "latency_seconds": 0.6512522719995104
+      "latency_seconds": 0.5410892979998607
     },
     {
       "db_id": "toxicology",
       "question": "Calculate the percentage of carcinogenic molecules which contain the Chlorine element.",
-      "n_iterations": 3,
+      "n_iterations": 1,
       "per_iteration_correct": [
-        false,
-        false,
         false
       ],
       "final_correct": false,
-      "final_sql": "SELECT \n  (COUNT(CASE WHEN a.element = 'Cl' THEN 1 END) * 100.0 / COUNT(*)) AS percentage\nFROM molecule m\nJOIN atom a ON m.molecule_id = a.molecule_id\nWHERE m.label = 'carcinogenic';",
+      "final_sql": "SELECT \n    (COUNT(CASE WHEN m.label = 'carcinogenic' AND a.element = 'Cl' THEN 1 END) * 100.0 / \n     COUNT(CASE WHEN m.label = 'carcinogenic' THEN 1 END)) AS percentage\nFROM molecule m\nJOIN atom a ON m.molecule_id = a.molecule_id\nWHERE m.label = 'carcinogenic';",
       "gold_error": null,
-      "latency_seconds": 2.2413102190002974
+      "latency_seconds": 0.7596781199990801
     },
     {
       "db_id": "codebase_community",
@@ -146,7 +142,7 @@
       "final_correct": true,
       "final_sql": "SELECT COUNT(DISTINCT UserId)\nFROM badges\nWHERE Name = 'Commentator'\n  AND strftime('%Y', Date) = '2014';",
       "gold_error": null,
-      "latency_seconds": 0.4022614519999479
+      "latency_seconds": 0.37126384200018947
     },
     {
       "db_id": "thrombosis_prediction",
@@ -156,9 +152,9 @@
         false
       ],
       "final_correct": false,
-      "final_sql": "SELECT COUNT(*) \nFROM \"Patient\" p\nJOIN \"Examination\" e ON p.\"ID\" = e.\"ID\"\nWHERE e.\"aCL IgG\" IS NOT NULL AND e.\"aCL IgG\" <= 20\n  AND e.\"Symptoms\" IS NOT NULL AND e.\"Symptoms\" != '';",
+      "final_sql": "SELECT COUNT(*) \nFROM \"Examination\" e\nJOIN \"Patient\" p ON e.\"ID\" = p.\"ID\"\nWHERE e.\"aCL IgG\" IS NOT NULL \n  AND e.\"aCL IgG\" <= 20 \n  AND e.\"Symptoms\" IS NOT NULL \n  AND e.\"Symptoms\" != ''",
       "gold_error": null,
-      "latency_seconds": 0.5992924000001949
+      "latency_seconds": 0.6260544239994488
     },
     {
       "db_id": "superhero",
@@ -170,7 +166,7 @@
       "final_correct": true,
       "final_sql": "SELECT COUNT(*) \nFROM superhero s\nJOIN hero_power hp ON s.id = hp.hero_id\nJOIN superpower p ON hp.power_id = p.id\nWHERE p.power_name = 'Super Strength';",
       "gold_error": null,
-      "latency_seconds": 0.41120410399980756
+      "latency_seconds": 0.41389333799997985
     },
     {
       "db_id": "card_games",
@@ -182,7 +178,7 @@
       "final_correct": true,
       "final_sql": "SELECT c.name\nFROM cards c\nJOIN sets s ON c.setCode = s.code\nWHERE s.name = 'Coldsnap'\nORDER BY c.convertedManaCost DESC\nLIMIT 1;",
       "gold_error": null,
-      "latency_seconds": 0.5224547140005598
+      "latency_seconds": 0.5276843669998925
     },
     {
       "db_id": "thrombosis_prediction",
@@ -194,7 +190,7 @@
       "final_correct": false,
       "final_sql": "SELECT AVG(l.\"UA\") AS average_UA\nFROM \"Laboratory\" l\nJOIN \"Patient\" p ON l.\"ID\" = p.\"ID\"\nWHERE l.\"UA\" <= 7.0\n  AND l.\"Date\" = (\n    SELECT MAX(l2.\"Date\")\n    FROM \"Laboratory\" l2\n    WHERE l2.\"ID\" = l.\"ID\"\n  );",
       "gold_error": null,
-      "latency_seconds": 0.6971716850002849
+      "latency_seconds": 0.7147104969990323
     },
     {
       "db_id": "codebase_community",
@@ -207,7 +203,7 @@
       "final_correct": false,
       "final_sql": "SELECT p.Title, p.CommunityOwnedDate, p.ClosedDate\nFROM posts p\nJOIN comments c ON p.Id = c.PostId\nWHERE c.UserId = 23853\n  AND c.CreationDate LIKE '2013-07-12 09:08:18%';",
       "gold_error": null,
-      "latency_seconds": 1.3919197850000273
+      "latency_seconds": 1.4176784139999654
     },
     {
       "db_id": "student_club",
@@ -219,7 +215,7 @@
       "final_correct": true,
       "final_sql": "SELECT COUNT(*) \nFROM \"member\" m\nJOIN \"major\" maj ON m.\"link_to_major\" = maj.\"major_id\"\nWHERE maj.\"major_name\" = 'Business' \n  AND m.\"t_shirt_size\" = 'Medium';",
       "gold_error": null,
-      "latency_seconds": 0.4740055129996108
+      "latency_seconds": 0.4821486229993752
     },
     {
       "db_id": "card_games",
@@ -232,7 +228,7 @@
       "final_correct": false,
       "final_sql": "SELECT originalType \nFROM cards \nWHERE name = 'Ancestor''s Chosen' \n  AND originalType IS NOT NULL \nLIMIT 1;",
       "gold_error": null,
-      "latency_seconds": 1.0402120689996082
+      "latency_seconds": 1.0535935280004196
     },
     {
       "db_id": "california_schools",
@@ -245,7 +241,7 @@
       "final_correct": false,
       "final_sql": "SELECT s.\"District\"\nFROM \"schools\" s\nJOIN \"satscores\" ss ON s.\"CDSCode\" = ss.\"cds\"\nWHERE s.\"StatusType\" = 'Active'\nGROUP BY s.\"District\"\nORDER BY AVG(ss.\"AvgScrRead\") DESC\nLIMIT 1;",
       "gold_error": null,
-      "latency_seconds": 1.481206413000109
+      "latency_seconds": 1.1386936039998545
     },
     {
       "db_id": "financial",
@@ -257,7 +253,7 @@
       "final_correct": true,
       "final_sql": "SELECT c.client_id\nFROM client c\nJOIN disp d ON c.client_id = d.client_id\nJOIN loan l ON d.account_id = l.account_id\nWHERE c.gender = 'F'\nORDER BY l.amount DESC\nLIMIT 3;",
       "gold_error": null,
-      "latency_seconds": 0.46114567599943257
+      "latency_seconds": 0.46955640300075174
     },
     {
       "db_id": "formula_1",
@@ -269,7 +265,7 @@
       "final_correct": false,
       "final_sql": "SELECT MIN(milliseconds) AS fastest_lap_time\nFROM lapTimes\nWHERE milliseconds IS NOT NULL;",
       "gold_error": null,
-      "latency_seconds": 0.708012594000138
+      "latency_seconds": 0.7061430880003172
     },
     {
       "db_id": "superhero",
@@ -281,7 +277,7 @@
       "final_correct": false,
       "final_sql": "SELECT \n  (SELECT COUNT(*) FROM superhero s JOIN colour c ON s.eye_colour_id = c.id WHERE s.weight_kg IS NULL AND c.colour = 'blue') -\n  (SELECT COUNT(*) FROM superhero s WHERE s.weight_kg IS NULL AND s.eye_colour_id IS NULL) AS difference",
       "gold_error": null,
-      "latency_seconds": 0.5427898460002325
+      "latency_seconds": 0.5552865850004309
     },
     {
       "db_id": "student_club",
@@ -293,7 +289,7 @@
       "final_correct": true,
       "final_sql": "SELECT COUNT(*) \nFROM \"major\" \nWHERE \"college\" = 'College of Agriculture and Applied Sciences' \n  AND \"department\" = 'School of Applied Sciences, Technology and Education';",
       "gold_error": null,
-      "latency_seconds": 0.39232685400020273
+      "latency_seconds": 0.3992940579992137
     },
     {
       "db_id": "codebase_community",
@@ -305,63 +301,59 @@
       "final_correct": false,
       "final_sql": "SELECT u.\"DisplayName\", u.\"Location\"\nFROM \"users\" u\nJOIN \"tags\" t ON u.\"Id\" = t.\"ExcerptPostId\"\nWHERE t.\"TagName\" = 'hypothesis-testing';",
       "gold_error": null,
-      "latency_seconds": 0.42654855199998565
+      "latency_seconds": 0.4365043710004102
     },
     {
       "db_id": "thrombosis_prediction",
       "question": "List all patients who were followed up at the outpatient clinic who underwent a laboratory test in October 1991 and had a total blood bilirubin level within the normal range.",
-      "n_iterations": 3,
+      "n_iterations": 2,
       "per_iteration_correct": [
-        false,
         false,
         false
       ],
       "final_correct": false,
-      "final_sql": "SELECT DISTINCT p.*\nFROM \"Patient\" p\nJOIN \"Laboratory\" l ON p.\"ID\" = l.\"ID\"\nWHERE p.\"Admission\" = 'outpatient clinic'\n  AND l.\"Date\" >= '1991-10-01'\n  AND l.\"Date\" < '1991-11-01'\n  AND l.\"T-BIL\" BETWEEN 0.2 AND 1.2\n  AND l.\"T-BIL\" IS NOT NULL\n  AND l.\"T-BIL\" != 0;",
+      "final_sql": "SELECT DISTINCT p.*\nFROM \"Patient\" p\nJOIN \"Laboratory\" l ON p.\"ID\" = l.\"ID\"\nWHERE p.\"Admission\" = 'outpatient clinic'\n  AND l.\"Date\" >= '1991-10-01'\n  AND l.\"Date\" < '1991-11-01'\n  AND l.\"T-BIL\" >= 0.2\n  AND l.\"T-BIL\" <= 1.2;",
       "gold_error": null,
-      "latency_seconds": 3.769799394999609
+      "latency_seconds": 2.239873107000676
     },
     {
       "db_id": "toxicology",
       "question": "Among the molecules with element Calcium, are they mostly carcinogenic or non carcinogenic?",
-      "n_iterations": 3,
+      "n_iterations": 2,
       "per_iteration_correct": [
-        false,
         false,
         false
       ],
       "final_correct": false,
       "final_sql": "SELECT \n  CASE \n    WHEN m.label LIKE '%carcinogenic%' THEN 'carcinogenic'\n    ELSE 'non carcinogenic'\n  END AS carcinogenic_status,\n  COUNT(*) AS count\nFROM molecule m\nJOIN atom a ON m.molecule_id = a.molecule_id\nWHERE a.element = 'Calcium'\nGROUP BY carcinogenic_status\nORDER BY count DESC;",
       "gold_error": null,
-      "latency_seconds": 2.704946130999815
+      "latency_seconds": 1.6940374040004826
     },
     {
       "db_id": "student_club",
       "question": "Please list the full names of the students in the Student_Club that come from the Art and Design Department.",
-      "n_iterations": 3,
+      "n_iterations": 2,
       "per_iteration_correct": [
-        false,
         false,
         false
       ],
       "final_correct": false,
       "final_sql": "SELECT m.first_name || ' ' || m.last_name AS full_name\nFROM member m\nJOIN major maj ON m.link_to_major = maj.major_id\nWHERE maj.department = 'Art and Design';",
       "gold_error": null,
-      "latency_seconds": 1.6388354139999137
+      "latency_seconds": 1.1335411600011867
     },
     {
       "db_id": "card_games",
       "question": "List all the mythic rarity print cards banned in gladiator format.",
-      "n_iterations": 3,
+      "n_iterations": 2,
       "per_iteration_correct": [
-        false,
         false,
         false
       ],
       "final_correct": false,
-      "final_sql": "SELECT c.name\nFROM cards c\nJOIN legalities l ON c.uuid = l.uuid\nWHERE c.rarity = 'mythic'\n  AND l.format = 'gladiator'\n  AND l.status = 'banned'\n  AND c.isAlternative = 0\n  AND c.isPromo = 0;",
+      "final_sql": "SELECT c.name\nFROM cards c\nJOIN legalities l ON c.uuid = l.uuid\nWHERE c.rarity = 'mythic'\n  AND l.format = 'gladiator'\n  AND l.status = 'banned'\n  AND c.isFoil = 0\n  AND c.isAlternative = 0;",
       "gold_error": null,
-      "latency_seconds": 2.0242086140005995
+      "latency_seconds": 1.1959925000010116
     },
     {
       "db_id": "codebase_community",
@@ -373,21 +365,20 @@
       "final_correct": false,
       "final_sql": "SELECT p.Id, p.Title, p.Score, p.ViewCount\nFROM posts p\nJOIN users u ON p.OwnerUserId = u.Id\nWHERE u.DisplayName IN ('Harvey Motulsky', 'Noah Snyder')\nORDER BY p.ViewCount DESC, p.Score DESC\nLIMIT 1;",
       "gold_error": null,
-      "latency_seconds": 0.8430996839997533
+      "latency_seconds": 0.8478175069994904
     },
     {
       "db_id": "codebase_community",
       "question": "Mention the reputation of users who had obtained the badge on 7/19/2010 7:39:08 PM.",
-      "n_iterations": 3,
+      "n_iterations": 2,
       "per_iteration_correct": [
-        false,
         false,
         false
       ],
       "final_correct": false,
       "final_sql": "SELECT u.Reputation\nFROM users u\nJOIN badges b ON u.Id = b.UserId\nWHERE b.Date = '2010-07-19 19:39:08';",
       "gold_error": null,
-      "latency_seconds": 1.5548909590006588
+      "latency_seconds": 1.0981599910010118
     }
   ]
 }
