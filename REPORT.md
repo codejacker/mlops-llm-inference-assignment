@@ -16,14 +16,20 @@ dependent LLM calls per user request.
 
 | Flag | Value | One-line justification |
 |---|---|---|
-| `--max-model-len` | `<e.g. 4096>` | `<cap context to real prompt+output size → more KV headroom>` |
-| `--gpu-memory-utilization` | `<e.g. 0.90>` | `<give KV cache room on the 80GB card>` |
-| `--max-num-seqs` | `<e.g. 256>` | `<concurrency ceiling; throughput vs latency dial>` |
-| `<quantization, if used>` | `<e.g. fp8>` | `<free memory for KV cache on a 30B MoE>` |
-| `<other>` | `<...>` | `<...>` |
+| `--max-model-len` | `4096` | Default is 262144 (256K); holding one request at that length needs 24 GiB KV cache but only ~8.7 GiB is free → engine refuses to start. Prompts are ~3K tokens, so 4096 covers them and frees the KV pool for concurrency. |
+| `--gpu-memory-utilization` | `0.92` | Weights take 56.9 GiB of the 80 GiB card. At 0.92 the budget is 73.6 GiB → ~10–11 GiB left for KV cache after overhead, up from 8.7 GiB at the 0.90 default. |
+| `--max-num-seqs` | `64` | Concurrency ceiling. Starting value; the throughput-vs-latency dial tuned in Phase 6 against the SLO. |
+| `--trust-remote-code` | `(flag)` | Qwen3's tokenizer ships custom code; without it vLLM falls back to the slow `Qwen2Tokenizer`, which crashes on `all_special_tokens_extended`. |
+| quantization | none (bf16) | Weights at bf16 (56.9 GiB) leave enough room for KV at 4096 context; fp8 was unnecessary for this prompt shape. Revisit if more concurrency is needed. |
 
-Notes on the MoE / prompt-shape tradeoff: `<why these levers for an A3B MoE with
-long prompts and short outputs>`
+Notes on the MoE / prompt-shape tradeoff: Qwen3-30B-A3B is an MoE — 30B total
+params on disk (~57 GiB at bf16) but only ~3B active per token, so it is
+**memory-bound, not compute-bound**. The binding constraint on one H100 is the
+KV-cache budget left after the full weights load, not FLOPs. With long-ish
+prompts (schema + question) and short SQL outputs, the highest-leverage knob is
+`--max-model-len`: shrinking the context window directly multiplies how many
+requests fit in the KV pool. `--gpu-memory-utilization` is the secondary lever,
+and `--max-num-seqs` caps tail latency under load.
 
 ---
 
@@ -32,11 +38,18 @@ long prompts and short outputs>`
 Run: `uv run python evals/run_eval.py --out results/eval_baseline.json` against
 the real 30B endpoint. 30 questions, execution accuracy (canonicalized row sets).
 
-- Overall pass rate: `<x>%`
-- Pass rate by iteration (carry-forward): iter0 `<a>%` → iter1 `<b>%` → iter2 `<c>%`
-- Avg iterations per question: `<n>`
+- Overall pass rate: **36.67%** (11/30)
+- Pass rate by iteration (carry-forward): iter0 **33.33%** → iter1 **36.67%** → iter2 **36.67%**
+- Avg iterations per question: **1.53**
+- Errors: 0/30
 
-Commentary: `<does the loop earn its keep? compare iter0 vs final>`
+Commentary: the verify/revise loop fixed **exactly one question** (33.33% → 36.67%,
+i.e. +1/30 = +3.33pp). The **third iteration added nothing** (36.67% → 36.67%), so
+in this baseline the loop's value comes entirely from a single revise pass; a cap
+of 2 iterations would have captured all the benefit. The loop earns a *modest but
+real* keep rather than a dramatic one. ~37% on BIRD with a 30B MoE and minimal
+prompting is a plausible baseline — the gap to higher accuracy is dominated by
+generation quality (schema linking, few-shot examples), not by more revise loops.
 
 ---
 
@@ -75,10 +88,28 @@ Did quality survive the tuning? `<yes/no + analysis if it regressed>`
 
 ## 4. Agent value
 
-`<One paragraph. Did the verify/revise loop actually help? How do you know? Cite
-the per-iteration pass rate from §2: if iter0 ≈ final, the loop is decoration; if
-final is meaningfully higher, it earns its keep. Mention an example question that
-was wrong at iter0 and correct after a revise.>`
+The verify/revise loop helped, modestly and measurably. By the per-iteration pass
+rate (§2), accuracy rose from **33.33% at iter0 to 36.67% after one revise** — the
+loop rescued exactly one of 30 questions, and the third iteration added nothing,
+so the entire benefit is one successful revise pass. Concrete example: *"What is
+the type of the card 'Ancestor's Chosen' as originally printed?"* (`card_games`)
+was **wrong at iter0 and correct after a revise** (`per_iteration_correct:
+[False, True]`). The first generation returned a value that didn't answer the
+question (a null / literal `'None'` originalType); the verifier flagged the result
+as implausible, and the revise produced:
+
+```sql
+SELECT DISTINCT originalType FROM cards
+WHERE name = 'Ancestor''s Chosen'
+  AND originalType IS NOT NULL AND originalType != 'None';
+```
+
+i.e. it added the guards that exclude the meaningless rows. This is the loop doing
+exactly its intended job — catching an answer that *executed fine but didn't make
+sense* — which a single generate-only pass cannot do. The honest caveat: at +3.3pp
+on this set the architecture's value is real but small, and the dominant lever for
+higher accuracy is generation quality (schema linking, few-shot prompting), not
+more revise iterations.
 
 ---
 
