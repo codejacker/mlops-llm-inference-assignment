@@ -30,8 +30,10 @@ from agent.execution import ExecutionResult, execute_sql
 from agent.schema import render_schema
 
 # Total generate + revise calls before the loop is forced to stop.
-# 3-5 is a reasonable range; tune it as part of Phase 3.
-MAX_ITERATIONS = 3
+# Phase 6: dropped 3 -> 2. The baseline eval (REPORT §2) showed iter2/iter3 add
+# zero accuracy, so this is accuracy-neutral and removes up to one generate+verify
+# round-trip per request under load.
+MAX_ITERATIONS = 2
 
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000/v1")
 VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
@@ -144,8 +146,25 @@ def verify_node(state: AgentState) -> dict:
     What counts as "not plausible" is yours to define - see the Phase 3 targets
     in the README.
     """
+    execution = state.execution
+
+    # Phase 6 short-circuit: if the SQL did not execute, that is self-evidently a
+    # bad answer - skip the LLM verify call (saves one vLLM round-trip per failed
+    # execution) and route straight to revise. Accuracy-neutral: a SQL error is
+    # never a valid answer, so the verifier would always say "not ok" anyway.
+    if execution is None or not execution.ok:
+        issue = (execution.error if execution and execution.error
+                 else "SQL produced no execution result")
+        return {
+            "verify_ok": False,
+            "verify_issue": f"SQL did not execute: {issue}",
+            "history": state.history + [
+                {"node": "verify", "ok": False, "issue": issue, "short_circuit": True}
+            ],
+        }
+
     # Compact text view of the rows-or-error to feed the verifier prompt.
-    result_view = state.execution.render() if state.execution else "NO EXECUTION RESULT"
+    result_view = execution.render()
 
     response = llm().invoke([
         ("system", prompts.VERIFY_SYSTEM),

@@ -12,6 +12,7 @@ import os
 import time
 from typing import Any
 
+from anyio import to_thread
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from prometheus_client import Counter, Histogram, make_asgi_app
@@ -56,6 +57,19 @@ AGENT_ITERATIONS = Histogram(
 
 # Exposes the metrics above at GET /metrics on the agent port (8001).
 app.mount("/metrics", make_asgi_app())
+
+# Concurrency ceiling (Phase 6). /answer is a sync handler, so FastAPI runs it in
+# AnyIO's threadpool, capped at 40 tokens by default - that cap was the throughput
+# wall under load (vLLM sat idle while agent requests queued for a thread). Each
+# handler is I/O-bound (it blocks on 2-3 sequential vLLM HTTP calls), so more
+# threads convert directly into more in-flight requests against vLLM's spare
+# capacity. 200 is comfortably above the ~10 RPS x ~10s = ~100 concurrent we need.
+AGENT_THREAD_LIMIT = int(os.environ.get("AGENT_THREAD_LIMIT", "200"))
+
+
+@app.on_event("startup")
+async def _raise_threadpool_limit() -> None:
+    to_thread.current_default_thread_limiter().total_tokens = AGENT_THREAD_LIMIT
 
 
 class AnswerRequest(BaseModel):
