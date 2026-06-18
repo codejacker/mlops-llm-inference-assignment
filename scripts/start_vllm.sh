@@ -10,4 +10,5 @@ exec uv run --no-sync python -m vllm.entrypoints.openai.api_server \
     --trust-remote-code \
     --max-model-len 4096 \
     --gpu-memory-utilization 0.92 \
-    --max-num-seqs 64
+    --max-num-seqs 64 \
+    --quantization fp8
